@@ -45,6 +45,11 @@ jobs:
         continue-on-error: true
         run: python scripts/update.py chains
 
+      - name: Update MegaBig shops and prices
+        id: megabig
+        continue-on-error: true
+        run: python scripts/update_megabig.py
+
       - name: Update Jankara prices
         id: jankara
         continue-on-error: true
@@ -60,6 +65,11 @@ jobs:
         continue-on-error: true
         run: python scripts/update_maneki_prices.py
 
+      - name: Update JoyJoy minimum prices
+        id: joyjoy
+        continue-on-error: true
+        run: python scripts/update_joyjoy_prices.py
+
       # 元データを先に積み、最新の main の上で金額への変換、確認、圧縮をしてプッシュする。
       # ocr.yml と同時に動いて main が先に進んでも、dist を作り直して再試行するので結果を失わない
       - name: Publish data
@@ -72,7 +82,7 @@ jobs:
           bash scripts/push_data.sh "data: refresh" chains.json source
 
       - name: Fail run when a step failed
-        if: steps.chains.outcome == 'failure' || steps.jankara.outcome == 'failure' || steps.bigecho.outcome == 'failure' || steps.maneki.outcome == 'failure' || steps.publish.outcome == 'failure'
+        if: steps.chains.outcome == 'failure' || steps.megabig.outcome == 'failure' || steps.jankara.outcome == 'failure' || steps.bigecho.outcome == 'failure' || steps.maneki.outcome == 'failure' || steps.joyjoy.outcome == 'failure' || steps.publish.outcome == 'failure'
         run: |
           echo "::error::Some data sources failed; see logs. Existing data was preserved where possible."
           exit 1

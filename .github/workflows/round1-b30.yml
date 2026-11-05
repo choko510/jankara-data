@@ -1,0 +1,71 @@
+name: Read ROUND1 B-30 price images
+
+# B-30型の4曜日表を定期取得。画像が変わったら確認用成果物を作り、
+# 目視確認済みのJSONとハッシュが合うときだけ配布料金を更新する。
+on:
+  workflow_dispatch:
+  schedule:
+    # 07:50 JST / 22:50 UTC (after the regular OCR workflow)
+    - cron: '50 22 * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/round1-b30.yml'
+      - 'ocr/round1_b30_targets.json'
+      - 'ocr/round1_b30_reviewed/**'
+      - 'ocr/run_round1_b30.py'
+      - 'scripts/extract_round1_b30.py'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: round1-b30-refresh
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install OCR dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tesseract-ocr
+          python -m pip install "requests>=2.32,<3" "pillow>=10,<12" "numpy>=1.26,<3" "pytesseract>=0.3.13,<1"
+
+      - name: Fetch and extract B-30 images
+        id: extract
+        run: |
+          python ocr/run_round1_b30.py --config ocr/round1_b30_targets.json --output source/round1_b30.json --work work/round1_b30
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          status = json.load(open("work/round1_b30/status.json", encoding="utf-8"))
+          print("publish=" + str(status["publish"]).lower())
+          PY
+
+      - name: Upload OCR evidence and review drafts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round1-b30-review
+          path: work/round1_b30/
+          retention-days: 14
+          if-no-files-found: warn
+
+      # 過去の確認済み料金を守るため、未確認の画像が1店でもあれば公開を止める。
+      - name: Publish verified B-30 prices
+        if: steps.extract.outputs.publish == 'true'
+        run: bash scripts/push_data.sh "data: verified B-30 prices" source/round1_b30.json

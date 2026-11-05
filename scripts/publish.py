@@ -22,6 +22,9 @@ SOURCES = {
     "bigecho": ROOT / "build" / "bigecho.json",
     "maneki": ROOT / "build" / "maneki.json",
     "kan": ROOT / "build" / "kan.json",
+    "megabig": ROOT / "build" / "megabig.json",
+    "joyjoy": ROOT / "build" / "joyjoy.json",
+    "round1": ROOT / "build" / "round1.json",
 }
 # 前回よりこの割合を下回ったら、取得か変換の異常とみなして前回のファイルを残す
 MIN_RATIO = 0.9
@@ -86,6 +89,10 @@ def main() -> int:
             legacy_file.unlink()
     files, published = {}, True
     for name, source in SOURCES.items():
+        # 未登録のROUND1店を空データとして配信しない。配信開始後に元データが
+        # 欠損した場合は失敗して前回分を維持する。
+        if name == "round1" and not source.exists() and name not in old:
+            continue
         document = json.loads(source.read_text(encoding="utf-8"))
         files[name], ok = publish_file(name, document, old.get(name))
         published = published and ok
