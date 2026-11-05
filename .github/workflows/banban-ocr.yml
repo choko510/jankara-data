@@ -1,0 +1,131 @@
+name: BanBan image OCR / price publishing
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/banban-ocr.yml'
+      - 'requirements-banban.txt'
+      - 'scripts/extract_banban.py'
+      - 'scripts/run_banban_ocr.py'
+      - 'tests/banban_ocr_ci.py'
+      - 'ocr/banban_approved.json'
+  push:
+    branches: [main]
+    paths:
+      - 'source/banban_images/**'
+      - 'ocr/banban_approved.json'
+  workflow_dispatch:
+    inputs:
+      shop_id:
+        description: 'BanBan店舗ID（例: bb-00075）'
+        type: string
+        required: true
+        default: 'bb-00075'
+      weekday:
+        description: '通常・平日画像: source/banban_images内のパスまたは公開HTTPS URL'
+        type: string
+        required: false
+      weekend:
+        description: '通常・土日祝画像: 同上'
+        type: string
+        required: false
+      solo_weekday:
+        description: 'ヒトカラ・平日画像: 同上'
+        type: string
+        required: false
+      solo_weekend:
+        description: 'ヒトカラ・土日祝画像: 同上'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: banban-image-ocr-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ocr-smoke:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-banban.txt
+      - name: Install Tesseract
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tesseract-ocr
+      - name: Install OCR dependencies
+        run: python -m pip install -r requirements-banban.txt
+      - name: OCR smoke tests (real Tesseract)
+        run: |
+          tesseract --version
+          python -m unittest discover -s tests -p 'banban_ocr_ci.py' -v
+          python scripts/extract_banban.py --help
+
+  extract-and-publish:
+    if: (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Never publish from a feature branch. The standard data publishing
+          # script rebases onto main and checks every generated output.
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-banban.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Tesseract
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tesseract-ocr
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-banban.txt
+      # 既存の入力画像が承認台帳と一致しない限り、公開ステップへ進めない。
+      - name: Extract prices from four images and verify manual approval
+        env:
+          BB_SHOP_ID: ${{ inputs.shop_id || 'bb-00075' }}
+          BB_WEEKDAY: ${{ inputs.weekday || '' }}
+          BB_WEEKEND: ${{ inputs.weekend || '' }}
+          BB_SOLO_WEEKDAY: ${{ inputs.solo_weekday || '' }}
+          BB_SOLO_WEEKEND: ${{ inputs.solo_weekend || '' }}
+        run: |
+          python scripts/run_banban_ocr.py \
+            --shop-id "$BB_SHOP_ID" \
+            --weekday "$BB_WEEKDAY" \
+            --weekend "$BB_WEEKEND" \
+            --solo-weekday "$BB_SOLO_WEEKDAY" \
+            --solo-weekend "$BB_SOLO_WEEKEND"
+      - name: Discard timestamp-only source changes
+        run: python scripts/select_changes.py
+      - name: Validate, publish XZ and push safely
+        run: |
+          bash scripts/push_data.sh \
+            "data: BanBan料金表を画像から更新" \
+            source/banban_prices.json
+      - name: Upload extracted JSON for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: banban-price-extraction
+          path: |
+            work/banban_ocr/
+            source/banban_prices.json
+          retention-days: 14

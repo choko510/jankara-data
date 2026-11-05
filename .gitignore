@@ -4,3 +4,6 @@ __pycache__/
 .venv/
 prices.csv
 build/
+
+# OCR候補・画像は確認用Actions artifactのみ
+work/banban_ocr/
